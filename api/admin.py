@@ -4,11 +4,11 @@ from django.utils.html import format_html
 from django.urls import reverse
 from django.utils.safestring import mark_safe
 from .models import (
-    User, Client, TypeLiaison, Liaison, PointDynamique, PhotoPoint,
-    MesureOTDR, Coupure, Intervention, CommitIntervention, FicheTechnique,
-    Notification, ParametreApplication
+    User, Client, TypeLiaison, Liaison, PointDynamique, Segment, PhotoPoint,
+    DetailONT, DetailPOPLS, DetailPOPFTTH, DetailChambre, DetailManchon, 
+    FAT, DetailFDT, MesureOTDR, Coupure, Intervention, CommitIntervention, 
+    FicheTechnique, Notification, ParametreApplication
 )
-
 
 # ===============================
 # Configuration utilisateurs
@@ -34,7 +34,6 @@ class UserAdmin(BaseUserAdmin):
         }),
     )
 
-
 # ===============================
 # Inline classes
 # ===============================
@@ -42,16 +41,32 @@ class UserAdmin(BaseUserAdmin):
 class PointDynamiqueInline(admin.TabularInline):
     model = PointDynamique
     extra = 0
-    fields = ('nom', 'type_point', 'latitude', 'longitude', 'distance_depuis_central', 'presence_splitter')
+    fields = ('nom', 'type_point', 'ordre', 'latitude', 'longitude', 'distance_depuis_central')
     readonly_fields = ('created_at', 'updated_at')
 
+class SegmentInline(admin.TabularInline):
+    model = Segment
+    extra = 0
+    fields = ('point_depart', 'point_arrivee', 'distance_gps', 'distance_cable')
+    readonly_fields = ('created_at', 'updated_at')
 
 class PhotoPointInline(admin.TabularInline):
     model = PhotoPoint
     extra = 0
-    fields = ('image', 'description', 'uploaded_by', 'uploaded_at')
+    fields = ('image', 'categorie', 'description', 'uploaded_by')
     readonly_fields = ('uploaded_at',)
 
+class MesureOTDRInline(admin.TabularInline):
+    model = MesureOTDR
+    extra = 0
+    fields = ('type_evenement', 'distance_coupure', 'attenuation', 'technicien', 'date_mesure')
+    readonly_fields = ('date_mesure',)
+
+class CoupureInline(admin.TabularInline):
+    model = Coupure
+    extra = 0
+    fields = ('status', 'point_dynamique_proche', 'date_detection')
+    readonly_fields = ('date_detection',)
 
 class InterventionInline(admin.TabularInline):
     model = Intervention
@@ -59,55 +74,49 @@ class InterventionInline(admin.TabularInline):
     fields = ('type_intervention', 'status', 'technicien_principal', 'date_planifiee')
     readonly_fields = ('created_at',)
 
-
-class CommitInterventionInline(admin.TabularInline):
-    model = CommitIntervention
-    extra = 0
-    fields = ('message_commit', 'auteur', 'date_commit', 'hash_commit')
-    readonly_fields = ('hash_commit', 'date_commit')
-
-
 # ===============================
-# Admin classes principales
+# Admins pour les clients
 # ===============================
 
 @admin.register(Client)
 class ClientAdmin(admin.ModelAdmin):
-    """Admin pour les clients"""
-    list_display = ('name', 'type', 'phone', 'email', 'liaisons_count', 'created_at')
-    list_filter = ('type', 'created_at')
-    search_fields = ('name', 'phone', 'email', 'address')
+    list_display = ('name', 'type_client', 'type_organisation', 'phone', 'email', 'created_at')
+    list_filter = ('type_client', 'type_organisation', 'created_at')
+    search_fields = ('name', 'raison_sociale', 'phone', 'email')
     ordering = ('name',)
-    
-    def liaisons_count(self, obj):
-        count = obj.liaisons.count()
-        if count > 0:
-            url = reverse('admin:api_liaison_changelist') + f'?client__id__exact={obj.id}'
-            return format_html('<a href="{}">{} liaisons</a>', url, count)
-        return '0 liaison'
-    liaisons_count.short_description = 'Liaisons'
-
-
-@admin.register(TypeLiaison)
-class TypeLiaisonAdmin(admin.ModelAdmin):
-    """Admin pour les types de liaisons"""
-    list_display = ('type', 'description')
-    list_filter = ('type',)
-    search_fields = ('type', 'description')
-
-
-@admin.register(Liaison)
-class LiaisonAdmin(admin.ModelAdmin):
-    """Admin pour les liaisons"""
-    list_display = ('nom_liaison', 'client', 'type_liaison', 'status', 'distance_totale', 'created_by', 'created_at')
-    list_filter = ('status', 'type_liaison', 'created_at', 'created_by')
-    search_fields = ('nom_liaison', 'client__name')
-    ordering = ('-created_at',)
-    inlines = [PointDynamiqueInline, InterventionInline]
     
     fieldsets = (
         ('Informations générales', {
-            'fields': ('nom_liaison', 'client', 'type_liaison', 'status', 'distance_totale', 'created_by')
+            'fields': ('name', 'raison_sociale', 'type_client', 'type_organisation')
+        }),
+        ('Contact', {
+            'fields': ('address', 'phone', 'email')
+        }),
+        ('Informations FTTH', {
+            'fields': ('numero_ligne', 'nom_ligne'),
+            'classes': ('collapse',)
+        }),
+    )
+
+@admin.register(TypeLiaison)
+class TypeLiaisonAdmin(admin.ModelAdmin):
+    list_display = ('type', 'description')
+    search_fields = ('type', 'description')
+
+# ===============================
+# Admins pour les liaisons
+# ===============================
+
+@admin.register(Liaison)
+class LiaisonAdmin(admin.ModelAdmin):
+    list_display = ('nom_liaison', 'client', 'type_liaison', 'status', 'distance_totale', 'created_at')
+    list_filter = ('status', 'type_liaison', 'created_at', 'client__type_client')
+    search_fields = ('nom_liaison', 'client__name')
+    ordering = ('-created_at',)
+    
+    fieldsets = (
+        ('Informations générales', {
+            'fields': ('nom_liaison', 'client', 'type_liaison', 'status')
         }),
         ('Coordonnées géographiques', {
             'fields': (
@@ -115,34 +124,55 @@ class LiaisonAdmin(admin.ModelAdmin):
                 ('point_client_lat', 'point_client_lng')
             )
         }),
-        ('Spécifications techniques LS', {
-            'fields': ('convertisseur_central', 'convertisseur_client', 'type_connectique'),
-            'classes': ('collapse',)
-        }),
-        ('Spécifications techniques GPON', {
-            'fields': ('olt_source', 'port_olt'),
-            'classes': ('collapse',)
+        ('Informations techniques', {
+            'fields': ('distance_totale', 'created_by')
         }),
     )
     
     readonly_fields = ('created_at', 'updated_at')
+    inlines = [PointDynamiqueInline, SegmentInline, MesureOTDRInline, CoupureInline, InterventionInline]
     
     def get_queryset(self, request):
         return super().get_queryset(request).select_related('client', 'type_liaison', 'created_by')
 
+# ===============================
+# Admins pour les points dynamiques
+# ===============================
+
+class DetailONTInline(admin.StackedInline):
+    model = DetailONT
+    extra = 0
+
+class DetailPOPLSInline(admin.StackedInline):
+    model = DetailPOPLS
+    extra = 0
+
+class DetailPOPFTTHInline(admin.StackedInline):
+    model = DetailPOPFTTH
+    extra = 0
+
+class DetailChambreInline(admin.StackedInline):
+    model = DetailChambre
+    extra = 0
+
+class DetailManchonInline(admin.StackedInline):
+    model = DetailManchon
+    extra = 0
+
+class DetailFDTInline(admin.StackedInline):
+    model = DetailFDT
+    extra = 0
 
 @admin.register(PointDynamique)
 class PointDynamiqueAdmin(admin.ModelAdmin):
-    """Admin pour les points dynamiques"""
-    list_display = ('nom', 'type_point', 'liaison', 'distance_depuis_central', 'presence_splitter', 'photos_count')
-    list_filter = ('type_point', 'presence_splitter', 'liaison__type_liaison', 'created_at')
+    list_display = ('nom', 'type_point', 'liaison', 'ordre', 'latitude', 'longitude', 'distance_depuis_central')
+    list_filter = ('type_point', 'liaison__type_liaison', 'created_at')
     search_fields = ('nom', 'description', 'liaison__nom_liaison')
-    ordering = ('liaison', 'distance_depuis_central')
-    inlines = [PhotoPointInline]
+    ordering = ('liaison', 'ordre')
     
     fieldsets = (
         ('Informations générales', {
-            'fields': ('liaison', 'nom', 'type_point', 'description')
+            'fields': ('nom', 'type_point', 'liaison', 'ordre')
         }),
         ('Position', {
             'fields': (
@@ -150,87 +180,130 @@ class PointDynamiqueAdmin(admin.ModelAdmin):
                 'distance_depuis_central'
             )
         }),
-        ('Informations techniques', {
-            'fields': (
-                'type_armoire',
-                ('presence_splitter', 'ratio_splitter'),
-                ('port_utilise', 'type_distribution')
-            )
+        ('Descriptions', {
+            'fields': ('description', 'commentaire_technicien')
         }),
     )
     
     readonly_fields = ('created_at', 'updated_at')
+    inlines = [PhotoPointInline, DetailONTInline, DetailPOPLSInline, DetailPOPFTTHInline, 
+               DetailChambreInline, DetailManchonInline, DetailFDTInline]
     
-    def photos_count(self, obj):
-        count = obj.photos.count()
-        if count > 0:
-            url = reverse('admin:api_photopoint_changelist') + f'?point_dynamique__id__exact={obj.id}'
-            return format_html('<a href="{}">{} photos</a>', url, count)
-        return '0 photo'
-    photos_count.short_description = 'Photos'
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('liaison')
 
+@admin.register(Segment)
+class SegmentAdmin(admin.ModelAdmin):
+    list_display = ('point_depart', 'point_arrivee', 'liaison', 'distance_gps', 'distance_cable')
+    list_filter = ('liaison', 'created_at')
+    search_fields = ('point_depart__nom', 'point_arrivee__nom', 'liaison__nom_liaison')
+    ordering = ('liaison', 'point_depart__ordre')
+    
+    fieldsets = (
+        ('Points', {
+            'fields': ('liaison', 'point_depart', 'point_arrivee')
+        }),
+        ('Distances', {
+            'fields': ('distance_gps', 'distance_cable')
+        }),
+        ('Tracé', {
+            'fields': ('trace_coords',),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    readonly_fields = ('created_at', 'updated_at')
+
+@admin.register(FAT)
+class FATAdmin(admin.ModelAdmin):
+    list_display = ('numero_fat', 'numero_fdt', 'liaison', 'latitude', 'longitude', 'created_at')
+    list_filter = ('numero_fdt', 'liaison', 'created_at')
+    search_fields = ('numero_fat', 'numero_fdt', 'port_splitter')
+    ordering = ('numero_fat',)
+    
+    fieldsets = (
+        ('Identification', {
+            'fields': ('numero_fat', 'numero_fdt', 'port_splitter')
+        }),
+        ('Position', {
+            'fields': ('latitude', 'longitude')
+        }),
+        ('Informations techniques', {
+            'fields': ('capacite_cable_entrant', 'couleur_toron', 'couleur_brin', 'moue_cable_poteau')
+        }),
+        ('Associations', {
+            'fields': ('liaison', 'point_dynamique')
+        }),
+        ('Commentaires', {
+            'fields': ('commentaire',)
+        }),
+    )
+    
+    readonly_fields = ('created_at', 'updated_at')
+
+# ===============================
+# Admins pour les photos
+# ===============================
 
 @admin.register(PhotoPoint)
 class PhotoPointAdmin(admin.ModelAdmin):
-    """Admin pour les photos des points"""
-    list_display = ('point_dynamique', 'description', 'uploaded_by', 'uploaded_at', 'image_preview')
-    list_filter = ('uploaded_at', 'point_dynamique__type_point')
-    search_fields = ('description', 'point_dynamique__nom')
+    list_display = ('point_dynamique', 'categorie', 'description', 'uploaded_by', 'uploaded_at')
+    list_filter = ('categorie', 'uploaded_at', 'uploaded_by')
+    search_fields = ('point_dynamique__nom', 'description')
     ordering = ('-uploaded_at',)
     
-    readonly_fields = ('uploaded_at', 'image_preview')
+    readonly_fields = ('uploaded_at',)
     
-    def image_preview(self, obj):
-        if obj.image:
-            return format_html('<img src="{}" style="width: 100px; height: 100px; object-fit: cover;" />', obj.image.url)
-        return 'Pas d\'image'
-    image_preview.short_description = 'Aperçu'
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('point_dynamique', 'uploaded_by')
 
+# ===============================
+# Admins pour les diagnostics
+# ===============================
 
 @admin.register(MesureOTDR)
 class MesureOTDRAdmin(admin.ModelAdmin):
-    """Admin pour les mesures OTDR"""
     list_display = ('liaison', 'type_evenement', 'distance_coupure', 'attenuation', 'technicien', 'date_mesure')
-    list_filter = ('type_evenement', 'date_mesure', 'technicien')
+    list_filter = ('type_evenement', 'position_technicien', 'direction_analyse', 'date_mesure')
     search_fields = ('liaison__nom_liaison', 'commentaires')
     ordering = ('-date_mesure',)
     
     fieldsets = (
-        ('Liaison', {
-            'fields': ('liaison', 'technicien')
+        ('Mesure', {
+            'fields': ('liaison', 'type_evenement', 'distance_coupure', 'attenuation')
         }),
-        ('Mesures', {
-            'fields': (
-                'type_evenement',
-                ('distance_coupure', 'attenuation'),
-                'commentaires'
-            )
+        ('Position et direction', {
+            'fields': ('position_technicien', 'point_mesure', 'direction_analyse')
         }),
-        ('Fichier', {
-            'fields': ('fichier_otdr',)
+        ('Métadonnées', {
+            'fields': ('technicien', 'commentaires', 'fichier_otdr')
         }),
     )
     
     readonly_fields = ('date_mesure',)
-
+    inlines = [CoupureInline]
 
 @admin.register(Coupure)
 class CoupureAdmin(admin.ModelAdmin):
-    """Admin pour les coupures"""
-    list_display = ('liaison', 'status', 'date_detection', 'date_resolution', 'superviseur_notifie', 'client_notifie', 'voir_carte')
+    list_display = ('liaison', 'status', 'point_dynamique_proche', 'date_detection', 'date_resolution')
     list_filter = ('status', 'date_detection', 'superviseur_notifie', 'client_notifie')
     search_fields = ('liaison__nom_liaison', 'description_diagnostic')
     ordering = ('-date_detection',)
     
     fieldsets = (
         ('Informations générales', {
-            'fields': ('liaison', 'mesure_otdr', 'status', 'description_diagnostic')
+            'fields': ('liaison', 'mesure_otdr', 'status')
         }),
         ('Localisation', {
             'fields': (
                 ('point_estime_lat', 'point_estime_lng'),
-                'point_dynamique_proche'
+                'point_dynamique_proche',
+                'segment_touche',
+                'distance_sur_segment'
             )
+        }),
+        ('Diagnostic', {
+            'fields': ('description_diagnostic',)
         }),
         ('Dates', {
             'fields': ('date_detection', 'date_resolution')
@@ -241,53 +314,51 @@ class CoupureAdmin(admin.ModelAdmin):
     )
     
     readonly_fields = ('date_detection',)
-    
-    def voir_carte(self, obj):
-        if obj.point_estime_lat and obj.point_estime_lng:
-            url = f"https://www.google.com/maps/@{obj.point_estime_lat},{obj.point_estime_lng},15z"
-            return format_html('<a href="{}" target="_blank">🗺️ Voir sur carte</a>', url)
-        return 'Position non calculée'
-    voir_carte.short_description = 'Carte'
 
+# ===============================
+# Admins pour les interventions
+# ===============================
+
+class CommitInterventionInline(admin.TabularInline):
+    model = CommitIntervention
+    extra = 0
+    fields = ('message_commit', 'auteur', 'date_commit')
+    readonly_fields = ('hash_commit', 'date_commit')
 
 @admin.register(Intervention)
 class InterventionAdmin(admin.ModelAdmin):
-    """Admin pour les interventions"""
-    list_display = ('liaison', 'type_intervention', 'status', 'technicien_principal', 'date_planifiee', 'date_debut', 'date_fin')
-    list_filter = ('type_intervention', 'status', 'date_planifiee', 'technicien_principal')
-    search_fields = ('liaison__nom_liaison', 'description', 'resume_changement')
+    list_display = ('type_intervention', 'liaison', 'status', 'technicien_principal', 'date_planifiee')
+    list_filter = ('type_intervention', 'status', 'date_planifiee')
+    search_fields = ('description', 'liaison__nom_liaison', 'technicien_principal__username')
     ordering = ('-date_planifiee',)
-    inlines = [CommitInterventionInline]
     
     fieldsets = (
         ('Informations générales', {
-            'fields': ('liaison', 'coupure', 'type_intervention', 'status')
+            'fields': ('type_intervention', 'status', 'liaison', 'coupure', 'fat')
         }),
         ('Personnel', {
             'fields': ('technicien_principal', 'techniciens_secondaires')
         }),
         ('Planification', {
-            'fields': (
-                'date_planifiee',
-                ('date_debut', 'date_fin'),
-                'duree_estimee'
-            )
+            'fields': ('date_planifiee', 'duree_estimee', 'date_debut', 'date_fin')
         }),
         ('Description', {
             'fields': ('description', 'resume_changement', 'materiel_utilise')
         }),
+        ('Rapport', {
+            'fields': ('rapport_final', 'photos_avant', 'photos_apres')
+        }),
     )
     
     readonly_fields = ('created_at', 'updated_at')
-    filter_horizontal = ('techniciens_secondaires',)
-
+    inlines = [CommitInterventionInline]
+    filter_horizontal = ('techniciens_secondaires', 'photos_avant', 'photos_apres')
 
 @admin.register(CommitIntervention)
 class CommitInterventionAdmin(admin.ModelAdmin):
-    """Admin pour les commits d'intervention"""
     list_display = ('intervention', 'message_commit', 'auteur', 'date_commit', 'hash_commit_short')
     list_filter = ('date_commit', 'auteur')
-    search_fields = ('message_commit', 'description_detaillee', 'intervention__liaison__nom_liaison')
+    search_fields = ('message_commit', 'description_detaillee', 'intervention__description')
     ordering = ('-date_commit',)
     
     readonly_fields = ('hash_commit', 'date_commit')
@@ -296,27 +367,27 @@ class CommitInterventionAdmin(admin.ModelAdmin):
         return obj.hash_commit[:8] if obj.hash_commit else ''
     hash_commit_short.short_description = 'Hash (court)'
 
+# ===============================
+# Admins pour les fiches techniques
+# ===============================
 
 @admin.register(FicheTechnique)
 class FicheTechniqueAdmin(admin.ModelAdmin):
-    """Admin pour les fiches techniques"""
     list_display = ('point_dynamique', 'modele_equipement', 'fabricant', 'numero_serie', 'date_installation')
     list_filter = ('fabricant', 'date_installation', 'created_at')
     search_fields = ('modele_equipement', 'numero_serie', 'fabricant', 'point_dynamique__nom')
     ordering = ('-created_at',)
     
     fieldsets = (
-        ('Point associé', {
+        ('Point dynamique', {
             'fields': ('point_dynamique',)
         }),
         ('Informations équipement', {
-            'fields': (
-                ('modele_equipement', 'fabricant'),
-                ('numero_serie', 'date_installation')
-            )
+            'fields': ('modele_equipement', 'numero_serie', 'fabricant', 'date_installation')
         }),
         ('Spécifications', {
-            'fields': ('specifications_json',)
+            'fields': ('specifications_json',),
+            'classes': ('collapse',)
         }),
         ('Documentation', {
             'fields': ('manuel_url', 'notes_maintenance')
@@ -325,47 +396,49 @@ class FicheTechniqueAdmin(admin.ModelAdmin):
     
     readonly_fields = ('created_at', 'updated_at')
 
+# ===============================
+# Admins pour les notifications
+# ===============================
 
 @admin.register(Notification)
 class NotificationAdmin(admin.ModelAdmin):
-    """Admin pour les notifications"""
-    list_display = ('destinataire', 'type_notification', 'titre', 'lue', 'date_creation', 'date_lecture')
-    list_filter = ('type_notification', 'lue', 'date_creation')
+    list_display = ('titre', 'type_notification', 'priorite', 'destinataire', 'lue', 'created_at')
+    list_filter = ('type_notification', 'priorite', 'lue', 'created_at')
     search_fields = ('titre', 'message', 'destinataire__username')
-    ordering = ('-date_creation',)
+    ordering = ('-created_at',)
     
     fieldsets = (
+        ('Notification', {
+            'fields': ('type_notification', 'priorite', 'titre', 'message')
+        }),
         ('Destinataire', {
-            'fields': ('destinataire', 'type_notification')
+            'fields': ('destinataire',)
         }),
-        ('Contenu', {
-            'fields': ('titre', 'message')
+        ('Objets concernés', {
+            'fields': ('liaison_concernee', 'coupure_concernee', 'intervention_concernee'),
+            'classes': ('collapse',)
         }),
-        ('Objets liés', {
-            'fields': ('liaison', 'coupure', 'intervention')
-        }),
-        ('État', {
-            'fields': ('lue', 'date_creation', 'date_lecture')
+        ('Status', {
+            'fields': ('lue', 'date_lecture')
         }),
     )
     
-    readonly_fields = ('date_creation',)
+    readonly_fields = ('created_at', 'date_lecture')
 
+# ===============================
+# Admins pour les paramètres
+# ===============================
 
 @admin.register(ParametreApplication)
 class ParametreApplicationAdmin(admin.ModelAdmin):
-    """Admin pour les paramètres d'application"""
-    list_display = ('cle', 'valeur_preview', 'type_donnee', 'description_short', 'updated_at')
-    list_filter = ('type_donnee', 'created_at', 'updated_at')
+    list_display = ('type_parametre', 'cle', 'valeur_courte', 'created_at')
+    list_filter = ('type_parametre', 'created_at')
     search_fields = ('cle', 'valeur', 'description')
-    ordering = ('cle',)
+    ordering = ('type_parametre', 'cle')
     
     fieldsets = (
         ('Paramètre', {
-            'fields': ('cle', 'type_donnee')
-        }),
-        ('Valeur', {
-            'fields': ('valeur',)
+            'fields': ('type_parametre', 'cle', 'valeur')
         }),
         ('Description', {
             'fields': ('description',)
@@ -374,18 +447,9 @@ class ParametreApplicationAdmin(admin.ModelAdmin):
     
     readonly_fields = ('created_at', 'updated_at')
     
-    def valeur_preview(self, obj):
-        if len(obj.valeur) > 50:
-            return obj.valeur[:50] + '...'
-        return obj.valeur
-    valeur_preview.short_description = 'Valeur'
-    
-    def description_short(self, obj):
-        if len(obj.description) > 100:
-            return obj.description[:100] + '...'
-        return obj.description
-    description_short.short_description = 'Description'
-
+    def valeur_courte(self, obj):
+        return obj.valeur[:50] + '...' if len(obj.valeur) > 50 else obj.valeur
+    valeur_courte.short_description = 'Valeur'
 
 # ===============================
 # Configuration du site admin

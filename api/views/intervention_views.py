@@ -6,19 +6,29 @@ from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
 from django.db.models import Q
 from ..models import Intervention, CommitIntervention
-from ..serializers import InterventionSerializer, CommitInterventionSerializer
+from ..serializers import (
+    InterventionListSerializer, InterventionDetailSerializer, 
+    InterventionCreateSerializer, CommitInterventionSerializer
+)
 
 
 class InterventionViewSet(viewsets.ModelViewSet):
     """ViewSet pour les interventions"""
     queryset = Intervention.objects.all()
-    serializer_class = InterventionSerializer
+    serializer_class = InterventionListSerializer
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['status', 'type_intervention', 'technicien_principal', 'liaison']
     search_fields = ['description', 'liaison__nom_liaison', 'liaison__client__name']
     ordering_fields = ['date_planifiee', 'created_at']
     ordering = ['-date_planifiee']
+    
+    def get_serializer_class(self):
+        if self.action in ['create', 'update', 'partial_update']:
+            return InterventionCreateSerializer
+        elif self.action == 'retrieve':
+            return InterventionDetailSerializer
+        return InterventionListSerializer
     
     def get_queryset(self):
         """Filtrer selon le rôle de l'utilisateur"""
@@ -70,7 +80,7 @@ class InterventionViewSet(viewsets.ModelViewSet):
             auteur=request.user
         )
         
-        return Response(InterventionSerializer(intervention, context={'request': request}).data)
+        return Response(InterventionDetailSerializer(intervention, context={'request': request}).data)
     
     @action(detail=True, methods=['post'])
     def commit(self, request, pk=None):
